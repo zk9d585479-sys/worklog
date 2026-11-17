@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#090909">
+<title>WorkLog</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#090909;color:#eee;
+ font-family:-apple-system,BlinkMacSystemFont,Arial;
+ padding:20px 16px 50px;
+}
+header{text-align:center;padding:20px}
+h1{color:#d5ad55;font-size:32px;letter-spacing:2px}
+.sub{color:#888;font-size:13px}
+nav{display:flex;gap:8px;margin:20px 0}
+button{
+ background:#d5ad55;color:#111;border:0;
+ padding:13px;border-radius:10px;
+ font-weight:bold;font-size:14px;cursor:pointer;
+}
+nav button{flex:1}
+.card{
+ background:#171717;border:1px solid #333;
+ border-radius:14px;padding:17px;margin-bottom:15px;
+}
+h2{font-size:17px;color:#d5ad55;margin-top:0}
+label{display:block;color:#aaa;font-size:13px;margin:13px 0 5px}
+input,select,textarea{
+ width:100%;padding:12px;border-radius:8px;
+ border:1px solid #444;background:#222;color:white;
+ font-size:16px;
+}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.full{width:100%;margin-top:12px}
+.secondary{background:#333;color:white}
+.record{border-bottom:1px solid #333;padding:12px 0}
+.record:last-child{border:0}
+.gold{color:#d5ad55}
+.small{font-size:12px;color:#888}
+.hidden{display:none}
+.actions{display:flex;gap:8px;margin-top:12px}
+.actions button{flex:1}
+.stat{font-size:24px;color:#d5ad55;font-weight:bold}
+</style>
+</head>
+
+<body>
+
+<header>
+<h1>WORKLOG</h1>
+<div class="sub">PERSONAL WORK & TRAVEL TRACKER</div>
+</header>
+
+<nav>
+<button onclick="show('home')">Главная</button>
+<button onclick="show('history')">История</button>
+<button onclick="show('stats')">Статистика</button>
+</nav>
+
+<section id="home">
+<div class="card">
+<h2>Сегодня</h2>
+<div class="small" id="today"></div>
+<button class="full" onclick="newDay()">+ Добавить день</button>
+</div>
+<div id="recent"></div>
+</section>
+
+<section id="form" class="hidden">
+<div class="card">
+<h2 id="formTitle">Новый день</h2>
+
+<label>Дата</label>
+<input type="date" id="date">
+
+<label>Тип дня</label>
+<select id="type">
+<option>Рабочий день</option>
+<option>Выходной в командировке</option>
+<option>День перелёта</option>
+<option>Выходной дома</option>
+</select>
+
+<label>Командировочные (€)</label>
+<input type="number" id="money" min="0" step="0.01" value="0">
+
+<h2 style="margin-top:25px">Рабочее время и дорога</h2>
+
+<label>Выехал из дома</label>
+<input type="datetime-local" id="homeOut">
+
+<label>Приехал на работу</label>
+<input type="datetime-local" id="workIn">
+
+<label>Закончил работу</label>
+<input type="datetime-local" id="workEnd">
+
+<label>Выехал с работы</label>
+<input type="datetime-local" id="workOut">
+
+<label>Приехал домой</label>
+<input type="datetime-local" id="homeIn">
+
+<h2 style="margin-top:25px">Суда и объекты</h2>
+<div id="visits"></div>
+<button class="secondary full" onclick="addVisit()">+ Добавить судно / объект</button>
+
+<label>Общий комментарий</label>
+<textarea id="notes" rows="3"></textarea>
+
+<div class="small" id="zoneInfo"></div>
+
+<button class="full" onclick="saveDay()">Сохранить день</button>
+<button class="secondary full" onclick="show('home')">Отмена</button>
+</div>
+</section>
+
+<section id="history" class="hidden">
+<div class="card">
+<h2>История записей</h2>
+<input id="search" placeholder="Поиск по судну, городу, стране..." oninput="render()">
+<div id="allRecords"></div>
+</div>
+</section>
+
+<section id="stats" class="hidden">
+<div class="card">
+<h2>Финансовая статистика</h2>
+<div class="small">Всего командировочных</div>
+<div class="stat" id="totalMoney">0 €</div>
+<hr style="border-color:#333;margin:20px 0">
+<div class="small">Количество дней</div>
+<div class="stat" id="totalDays">0</div>
+<hr style="border-color:#333;margin:20px 0">
+<div class="small">Рабочие дни</div>
+<div class="stat" id="workingDays">0</div>
+<hr style="border-color:#333;margin:20px 0">
+<div class="small">Общее время работы</div>
+<div class="stat" id="totalHours">0 ч</div>
+<button class="full" onclick="backup()">Экспорт резервной копии</button>
+</div>
+</section>
+
+<script>
+const KEY='worklog_data_v1';
+let days=JSON.parse(localStorage.getItem(KEY)||'[]');
+let editing=null;
+
+const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function localDate(){
+ const d=new Date();
+ return d.getFullYear()+'-'+
+ String(d.getMonth()+1).padStart(2,'0')+'-'+
+ String(d.getDate()).padStart(2,'0');
+}
+
+function show(id){
+ ['home','form','history','stats'].forEach(x=>
+ document.getElementById(x).classList.add('hidden'));
+ document.getElementById(id).classList.remove('hidden');
+ render();
+}
+
+function newDay(){
+ editing=null;
+ document.getElementById('formTitle').textContent='Новый день';
+ ['money','homeOut','workIn','workEnd','workOut','homeIn','notes']
+ .forEach(x=>document.getElementById(x).value='');
+ document.getElementById('date').value=localDate();
+ document.getElementById('type').value='Рабочий день';
+ document.getElementById('visits').innerHTML='';
+ document.getElementById('zoneInfo').textContent='Часовой пояс устройства: '+zone;
+ show('form');
+}
+
+function addVisit(v={}){
+ const box=document.createElement('div');
+ box.className='card';
+ box.innerHTML=`
+ <label>Название судна / объекта</label>
+ <input class="ship" placeholder="MV Example" value="${escapeHTML(v.ship||'')}">
+ <label>Город</label>
+ <input class="city" placeholder="Hamburg" value="${escapeHTML(v.city||'')}">
+ <label>Страна</label>
+ <input class="country" placeholder="Germany" value="${escapeHTML(v.country||'')}">
+ <label>Начало посещения</label>
+ <input class="start" type="datetime-local" value="${v.start||''}">
+ <label>Окончание посещения</label>
+ <input class="end" type="datetime-local" value="${v.end||''}">
+ <label>Тип посещения</label>
+ <select class="visitType">
+ <option ${v.visitType==='Работа'?'selected':''}>Работа</option>
+ <option ${v.visitType==='Нахождение в командировке'?'selected':''}>Нахождение в командировке</option>
+ </select>
+ <button class="secondary full" onclick="this.parentElement.remove()">Удалить объект</button>
+ `;
+ document.getElementById('visits').appendChild(box);
+}
+
+function escapeHTML(s){
+ return String(s).replace(/[&<>"']/g,c=>({
+ '&':'&amp;','<':'&lt;','>':'&gt;',
+ '"':'&quot;',"'":'&#39;'
+ }[c]));
+}
+
+function saveDay(){
+ const visits=[...document.querySelectorAll('#visits .card')].map(x=>({
+ ship:x.querySelector('.ship').value,
+ city:x.querySelector('.city').value,
+ country:x.querySelector('.country').value,
+ start:x.querySelector('.start').value,
+ end:x.querySelector('.end').value,
+ visitType:x.querySelector('.visitType').value,
+ timezone:zone
+ }));
+
+ const item={
+ id:editing||Date.now(),
+ date:document.getElementById('date').value,
+ type:document.getElementById('type').value,
+ money:Number(document.getElementById('money').value)||0,
+ homeOut:document.getElementById('homeOut').value,
+ workIn:document.getElementById('workIn').value,
+ workEnd:document.getElementById('workEnd').value,
+ workOut:document.getElementById('workOut').value,
+ homeIn:document.getElementById('homeIn').value,
+ visits,
+ notes:document.getElementById('notes').value,
+ timezone:zone
+ };
+
+ if(!item.date){alert('Укажи дату');return}
+
+ if(editing){
+ const i=days.findIndex(d=>d.id===editing);
+ if(i>=0)days[i]=item;
+ }else days.push(item);
+
+ localStorage.setItem(KEY,JSON.stringify(days));
+ editing=null;
+ show('home');
+}
+
+function editDay(id){
+ const d=days.find(x=>x.id===id);
+ if(!d)return;
+ editing=id;
+ document.getElementById('formTitle').textContent='Редактирование дня';
+ ['date','type','money','homeOut','workIn','workEnd','workOut','homeIn','notes']
+ .forEach((key,i)=>{
+ const fields=['date','type','money','homeOut','workIn','workEnd','workOut','homeIn','notes'];
+ document.getElementById(key).value=d[key]??'';
+ });
+ document.getElementById('visits').innerHTML='';
+ (d.visits||[]).forEach(addVisit);
+ document.getElementById('zoneInfo').textContent='Часовой пояс записи: '+(d.timezone||'не указан');
+ show('form');
+}
+
+function deleteDay(id){
+ if(!confirm('Удалить эту запись?'))return;
+ days=days.filter(d=>d.id!==id);
+ localStorage.setItem(KEY,JSON.stringify(days));
+ render();
+}
+
+function duration(a,b){
+ if(!a||!b)return 0;
+ return Math.max(0,(new Date(b)-new Date(a))/3600000);
+}
+
+function card(d){
+ const hours=duration(d.workIn,d.workEnd);
+ return `<div class="record">
+ <b class="gold">${escapeHTML(d.date)}</b>
+ <div>${escapeHTML(d.type)}</div>
+ <div class="small">Командировочные: ${Number(d.money).toFixed(2)} €</div>
+ <div class="small">Работа: ${hours.toFixed(2)} ч</div>
+ <div class="small">${(d.visits||[]).map(v=>
+ escapeHTML([v.ship,v.city,v.country].filter(Boolean).join(' · '))
+ ).join('<br>')}</div>
+ <div class="actions">
+ <button onclick="editDay(${d.id})">Изменить</button>
+ <button class="secondary" onclick="deleteDay(${d.id})">Удалить</button>
+ </div></div>`;
+}
+
+function render(){
+ document.getElementById('today').textContent=localDate();
+ document.getElementById('recent').innerHTML=
+ [...days].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3).map(card).join('')
+ ||'<div class="card small">Пока нет записей. Добавь свой первый рабочий день.</div>';
+
+ const q=(document.getElementById('search')?.value||'').toLowerCase();
+ const filtered=[...days].sort((a,b)=>b.date.localeCompare(a.date))
+ .filter(d=>JSON.stringify(d).toLowerCase().includes(q));
+ document.getElementById('allRecords').innerHTML=filtered.map(card).join('')
+ ||'<p class="small">Записей пока нет.</p>';
+
+ document.getElementById('totalMoney').textContent=
+ days.reduce((s,d)=>s+Number(d.money||0),0).toFixed(2)+' €';
+ document.getElementById('totalDays').textContent=days.length;
+ document.getElementById('workingDays').textContent=
+ days.filter(d=>d.type==='Рабочий день').length;
+ document.getElementById('totalHours').textContent=
+ days.reduce((s,d)=>s+duration(d.workIn,d.workEnd),0).toFixed(2)+' ч';
+}
+
+function backup(){
+ const blob=new Blob([JSON.stringify(days,null,2)],{type:'application/json'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a');
+ a.href=url;a.download='worklog-backup.json';a.click();
+ URL.revokeObjectURL(url);
+}
+
+render();
+</script>
+</body>
+</html>
